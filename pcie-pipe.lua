@@ -31,7 +31,30 @@ p_tlp.fields.ep    = ProtoField.uint24("pcie.tlp.ep", "EP",     base.DEC, NULL, 
 p_tlp.fields.at    = ProtoField.uint24("pcie.tlp.at", "AT",     base.BIN, NULL, 0x00000C00)
 p_tlp.fields.len_value = ProtoField.uint24("pcie.tlp.len_value", "Length", base.DEC, NULL, 0x3FF, "Length from TLP header")
 p_tlp.fields.length = ProtoField.uint16("pcie.tlp.length", "Calculated length", base.DEC, NULL, NULL, "Calculated TLP packet payload length")
+
+p_tlp.fields.rq_id = ProtoField.uint16("pcie.tlp.rq_id", "Requester ID", base.HEX)
+p_tlp.fields.tag   = ProtoField.uint8("pcie.tlp.tag", "Tag", base.HEX)
+p_tlp.fields.last_be = ProtoField.uint8("pcie.tlp.last_be", "Last BE", base.HEX, NULL, 0xf0)
+p_tlp.fields.first_be = ProtoField.uint8("pcie.tlp.first_be", "First BE", base.HEX, NULL, 0x0f)
+
+p_tlp.fields.comp_id = ProtoField.uint16("pcie.tlp.comp_id", "Completer ID", base.HEX)
+p_tlp.fields.status = ProtoField.uint16("pcie.tlp.status", "Status", base.HEX, NULL, 0xE000)
+p_tlp.fields.bcm = ProtoField.uint16("pcie.tlp.bcm", "BCM", base.HEX, NULL, 0x1000, "Bridge control mechanism")
+p_tlp.fields.byte_count = ProtoField.uint16("pcie.tlp.byte_count", "Byte count", base.HEX, NULL, 0x0FFF)
+p_tlp.fields.lower_addr = ProtoField.uint16("pcie.tlp.lower_addr", "Lower address", base.HEX, NULL, 0x7F)
+
+p_tlp.fields.bus_no = ProtoField.uint16("pcie.tlp.bus_no", "Bus number", base.HEX, NULL, 0xFF00)
+p_tlp.fields.dev_no = ProtoField.uint16("pcie.tlp.dev_no", "Dev. number", base.HEX, NULL, 0x00F8, "Device number")
+p_tlp.fields.fun_no = ProtoField.uint16("pcie.tlp.fun_no", "Fun. number", base.HEX, NULL, 0x0007, "Function number")
+
 p_tlp.fields.addr  = ProtoField.uint64("pcie.tlp.addr", "Address", base.HEX)
+
+function dissect_pcieid(field, range, tree)
+	local subtree = tree:add(field, range)
+	subtree:add(p_tlp.fields.bus_no, range)
+	subtree:add(p_tlp.fields.dev_no, range)
+	subtree:add(p_tlp.fields.fun_no, range)
+end
 
 function dissect_tlp(buf, pkt, tree)
 	local fmt = bit.rshift(buf(0, 1):uint(), 5)
@@ -56,13 +79,32 @@ function dissect_tlp(buf, pkt, tree)
 	local length = bit.band(buf(2, 2):uint() - 1, 0x3FF) + 1
 	h1tree:add(p_tlp.fields.length, h1, length)
 	if bit.band(fmt, 2) == 0 then
+		-- Read/Cpl
 		length = 0
 	end
-	local addr = buf(8, 4)
-	if le == 4 then
-		addr = buf(8, 8)
+
+	if bit.band(buf(0, 1):uint(), 0x80) == 0 then
+		-- Read/Write
+		dissect_pcieid(p_tlp.fields.rq_id, buf(4, 2), hdrtree)
+		hdrtree:add(p_tlp.fields.tag, buf(6, 1))
+		hdrtree:add(p_tlp.fields.last_be, buf(7, 1))
+		hdrtree:add(p_tlp.fields.first_be, buf(7, 1))
+		local addr = buf(8, 4)
+		if le == 4 then
+			addr = buf(8, 8)
+		end
+		hdrtree:add(p_tlp.fields.addr, addr)
+	else
+		-- Completion
+		dissect_pcieid(p_tlp.fields.comp_id, buf(4, 2), hdrtree)
+		hdrtree:add(p_tlp.fields.status, buf(6, 2))
+		hdrtree:add(p_tlp.fields.bcm, buf(6, 2))
+		hdrtree:add(p_tlp.fields.byte_count, buf(6, 2))
+		dissect_pcieid(p_tlp.fields.rq_id, buf(8, 2), hdrtree)
+		hdrtree:add(p_tlp.fields.tag, buf(10, 1))
+		hdrtree:add(p_tlp.fields.lower_addr, buf(11, 1))
 	end
-	hdrtree:add(p_tlp.fields.addr, addr)
+
 	data_dis:call(buf(4 * le, 4 * length):tvb(), pkt, tree)
 	return (le + length) * 4
 end
