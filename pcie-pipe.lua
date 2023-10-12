@@ -6,13 +6,13 @@ local data_dis = Dissector.get("data")
 p_tlp = Proto("pcie.tlp", "PCIe TLP")
 
 local fmttp_map = {
-	[0x00] = "MRd: Memory Read Request",
-	[0x20] = "MRd: Memory Read Request",
-	[0x40] = "MWr: Memory Write Request",
-	[0x60] = "MWr: Memory Write Request",
+	[0x00] = "MRd : Memory Read Request",
+	[0x20] = "MRd : Memory Read Request",
+	[0x40] = "MWr : Memory Write Request",
+	[0x60] = "MWr : Memory Write Request",
 	[0x02] = "IORd: I/O Read Request",
 	[0x42] = "IOWr: I/O Write Request",
-	[0x0A] = "Cpl: Completion without Data",
+	[0x0A] = "Cpl : Completion without Data",
 	[0x4A] = "CplD: Completion with Data",
 }
 
@@ -56,6 +56,11 @@ function dissect_pcieid(field, range, tree)
 	subtree:add(p_tlp.fields.fun_no, range)
 end
 
+function pretty_pcieid(range)
+	local id = range:uint()
+	return string.format('%02x:%02x.%x', bit.rshift(id, 8), bit.band(bit.rshift(id, 3), 0x7F), bit.band(id, 0x0007))
+end
+
 function dissect_tlp(buf, pkt, tree)
 	local fmt = bit.rshift(buf(0, 1):uint(), 5)
 	local le = 3 + bit.band(fmt, 1)
@@ -83,9 +88,10 @@ function dissect_tlp(buf, pkt, tree)
 		length = 0
 	end
 
-	if bit.band(buf(0, 1):uint(), 0x80) == 0 then
+	if bit.band(buf(0, 1):uint(), 0x08) == 0 then
 		-- Read/Write
 		dissect_pcieid(p_tlp.fields.rq_id, buf(4, 2), hdrtree)
+		hdrtree:add(buf(8,2), "Decoded requester:", pretty_pcieid(buf(8, 2)))
 		hdrtree:add(p_tlp.fields.tag, buf(6, 1))
 		hdrtree:add(p_tlp.fields.last_be, buf(7, 1))
 		hdrtree:add(p_tlp.fields.first_be, buf(7, 1))
@@ -94,13 +100,18 @@ function dissect_tlp(buf, pkt, tree)
 			addr = buf(8, 8)
 		end
 		hdrtree:add(p_tlp.fields.addr, addr)
+		pkt.cols.info:set(string.format('%.4s %s @ %08x', fmttp_map[h0:uint()], pretty_pcieid(buf(4, 2)), addr:uint()))
 	else
 		-- Completion
 		dissect_pcieid(p_tlp.fields.comp_id, buf(4, 2), hdrtree)
+		pkt.cols.src:append(pretty_pcieid(buf(4, 2)))
+		hdrtree:add(buf(4,2), "Decoded completer:", pretty_pcieid(buf(4, 2)))
 		hdrtree:add(p_tlp.fields.status, buf(6, 2))
 		hdrtree:add(p_tlp.fields.bcm, buf(6, 2))
 		hdrtree:add(p_tlp.fields.byte_count, buf(6, 2))
 		dissect_pcieid(p_tlp.fields.rq_id, buf(8, 2), hdrtree)
+		pkt.cols.info:set(string.format('%.4s %s -> %s', fmttp_map[h0:uint()], pretty_pcieid(buf(4, 2)), pretty_pcieid(buf(8, 2))))
+		hdrtree:add(buf(8,2), "Decoded requester:", pretty_pcieid(buf(8, 2)))
 		hdrtree:add(p_tlp.fields.tag, buf(10, 1))
 		hdrtree:add(p_tlp.fields.lower_addr, buf(11, 1))
 	end
@@ -111,7 +122,7 @@ end
 
 p_dltlp = Proto("pcie.dltlp", "PCIe DL TLP")
 
-p_dltlp.fields.seqno = ProtoField.uint16("pcie.dl.tlp_seqno", "Type", base.HEX, NULL, 0x0FFF)
+p_dltlp.fields.seqno = ProtoField.uint16("pcie.dl.tlp_seqno", "Seq num", base.HEX, NULL, 0x0FFF)
 p_dltlp.fields.lcrc = ProtoField.uint32("pcie.dl.tlp_lcrc", "LCRC", base.HEX)
 
 function dissect_dltlp(buf, pkt, tree)
@@ -127,13 +138,62 @@ end
 -------------------------------------------------------------------------
 p_dllp = Proto("pcie.dllp", "PCIe DLLP")
 
-p_dllp.fields.type = ProtoField.uint8("pcie.dllp.type", "Type", base.HEX)
+dlltp_map = {
+	{0x00, 0x00, "Ack"},
+	{0x01, 0x01, "MRInit"},
+	{0x02, 0x02, "Data_Link_Feature"},
+	{0x10, 0x10, "Nak"},
+	{0x20, 0x20, "PM_Enter_L1"},
+	{0x21, 0x21, "PM_Enter_L23"},
+	{0x23, 0x23, "PM_Active_State_Request_L1"},
+	{0x24, 0x24, "PM_Request_Ack"},
+	{0x30, 0x30, "Vendor-specific"},
+	{0x31, 0x31, "NOP"},
+
+	{0x40, 0x47, "InitFC1-P"},
+	{0x50, 0x57, "InitFC1-NP"},
+	{0x60, 0x67, "InitFC1-Cpl"},
+	{0x70, 0x77, "MRInitFC1"},
+
+	{0x80, 0x87, "UpdateFC-P"},
+	{0x90, 0x97, "UpdateFC-NP"},
+	{0xA0, 0xA7, "UpdateFC-Cpl"},
+	{0xB0, 0xB7, "MRUpdateFC"},
+
+	{0xC0, 0xC7, "InitFC2-P"},
+	{0xD0, 0xD7, "InitFC2-NP"},
+	{0xE0, 0xE7, "InitFC2-Cpl"},
+	{0xF0, 0xF7, "MRInitFC2"},
+}
+
+p_dllp.fields.type = ProtoField.uint8("pcie.dllp.type", "Type", base.HEX + base.RANGE_STRING, dlltp_map)
+p_dllp.fields.seq_num = ProtoField.uint24("pcie.dllp.seq_num", "Seq num", base.HEX, NULL, 0x000FFF)
+
+p_dllp.fields.vcid = ProtoField.uint8("pcie.dllp.vcid", "VC ID", base.DEC, NULL, 0x07)
+p_dllp.fields.hdr_scale = ProtoField.uint24("pcie.dllp.hdr_scale", "Hdr scale", base.DEC, NULL, 0xC00000)
+p_dllp.fields.hdrfc = ProtoField.uint24("pcie.dllp.hdrfc", "HdrFC", base.HEX, NULL, 0x3FC000)
+p_dllp.fields.data_scale = ProtoField.uint24("pcie.dllp.data_scale", "Data scale", base.DEC, NULL, 0x003000)
+p_dllp.fields.datafc = ProtoField.uint24("pcie.dllp.datafc", "DataFC", base.HEX, NULL, 0x000FFF)
+
 p_dllp.fields.crc16 = ProtoField.uint16("pcie.dllp.crc16", "CRC16", base.HEX)
 
 function dissect_dllp(buf, pkt, tree)
 	local subtree = tree:add(p_dllp, buf(0, 6))
 	subtree:add(p_dllp.fields.type, buf(0, 1))
-	local contents = subtree:add(buf(1, 3), "Contents")
+	-- local contents = subtree:add(buf(1, 3), "Contents")
+	local tp = buf(0,1):uint()
+	local data = buf(1, 3)
+	if bit.band(tp, 0xC0) ~= 0 and bit.band(tp, 0x08) == 0 then
+		subtree:add(p_dllp.fields.vcid, buf(0, 1))
+		subtree:add(p_dllp.fields.hdr_scale, data)
+		subtree:add(p_dllp.fields.hdrfc, data)
+		subtree:add(p_dllp.fields.data_scale, data)
+		subtree:add(p_dllp.fields.datafc, data)
+	elseif bit.band(tp, 0xEF) == 0 then
+		subtree:add(p_dllp.fields.seq_num, data)
+	else
+		data_dis:call(data:tvb(), pkt, subtree)
+	end
 	subtree:add(p_dllp.fields.crc16, buf(4, 2))
 	return 6
 end
