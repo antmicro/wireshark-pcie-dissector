@@ -1,0 +1,20 @@
+.ace: &ace
+  tags: ['ace-x86_64']
+
+stages:
+  - lint
+
+image: d2s://external/docker/debian:bookworm
+
+lint:
+  <<: *ace
+  stage: lint
+  variables:
+    SCALENODE_CPU: 1
+    SCALENODE_RAM: 1024
+    SCALENODE_DISK: 1
+  before_script:
+    - apt-get update
+    - apt-get install -y lua-check
+  script:
+    - luacheck *.lua
