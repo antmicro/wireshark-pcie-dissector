@@ -5,8 +5,17 @@ globals = {
 			BIN = {},
 			DEC = {},
 			HEX = {},
+			NONE = {},
 			OCT = {},
 			RANGE_STRING = {},
+		},
+	},
+	frametype = {
+		fields = {
+			ACK = {},
+			RESPONSE = {},
+			REQUEST = {},
+			NONE = {},
 		},
 	},
 	Dissector = {
@@ -22,6 +31,7 @@ globals = {
 	Proto = {},
 	ProtoField = {
 		fields = {
+			framenum = {},
 			uint8 = {},
 			uint16 = {},
 			uint24 = {},

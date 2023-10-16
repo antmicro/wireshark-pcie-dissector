@@ -49,6 +49,9 @@ p_tlp.fields.bus_no = ProtoField.uint16("pcie.tlp.bus_no", "Bus number", base.HE
 p_tlp.fields.dev_no = ProtoField.uint16("pcie.tlp.dev_no", "Dev. number", base.HEX, nil, 0x00F8, "Device number")
 p_tlp.fields.fun_no = ProtoField.uint16("pcie.tlp.fun_no", "Fun. number", base.HEX, nil, 0x0007, "Function number")
 
+p_tlp.fields.res_frame = ProtoField.framenum("pcie.tlp.res_frame", "Response frame", base.NONE, frametype.RESPONSE)
+p_tlp.fields.req_frame = ProtoField.framenum("pcie.tlp.req_frame", "Request frame", base.NONE, frametype.REQUEST)
+
 p_tlp.fields.addr  = ProtoField.uint64("pcie.tlp.addr", "Address", base.HEX)
 
 local function dissect_pcieid(field, range, tree)
@@ -62,6 +65,9 @@ local function pretty_pcieid(range)
 	local id = range:uint()
 	return string.format('%02x:%02x.%x', bit.rshift(id, 8), bit.band(bit.rshift(id, 3), 0x7F), bit.band(id, 0x0007))
 end
+
+local req_to_frame = {}
+local reqframe_to_resframe = {}
 
 local function dissect_tlp(buf, pkt, tree)
 	local fmt = bit.rshift(buf(0, 1):uint(), 5)
@@ -90,11 +96,16 @@ local function dissect_tlp(buf, pkt, tree)
 		length = 0
 	end
 
-	if bit.band(buf(0, 1):uint(), 0x08) == 0 then
+	if bit.band(buf(0, 1):uint(), 0x1e) ~= 0x0a then
 		-- Read/Write
 		dissect_pcieid(p_tlp.fields.rq_id, buf(4, 2), hdrtree)
-		hdrtree:add(buf(8,2), "Decoded requester:", pretty_pcieid(buf(8, 2)))
+		hdrtree:add(buf(8, 2), "Decoded requester:", pretty_pcieid(buf(8, 2)))
 		hdrtree:add(p_tlp.fields.tag, buf(6, 1))
+
+		local req_uniq = buf(4, 3):uint()
+		req_to_frame[req_uniq] = pkt.number
+		hdrtree:add(p_tlp.fields.res_frame, buf(4, 3), reqframe_to_resframe[pkt.number])
+
 		hdrtree:add(p_tlp.fields.last_be, buf(7, 1))
 		hdrtree:add(p_tlp.fields.first_be, buf(7, 1))
 		local addr = buf(8, 4)
@@ -110,7 +121,7 @@ local function dissect_tlp(buf, pkt, tree)
 		-- Completion
 		dissect_pcieid(p_tlp.fields.comp_id, buf(4, 2), hdrtree)
 		pkt.cols.src:append(pretty_pcieid(buf(4, 2)))
-		hdrtree:add(buf(4,2), "Decoded completer:", pretty_pcieid(buf(4, 2)))
+		hdrtree:add(buf(4, 2), "Decoded completer:", pretty_pcieid(buf(4, 2)))
 		hdrtree:add(p_tlp.fields.status, buf(6, 2))
 		hdrtree:add(p_tlp.fields.bcm, buf(6, 2))
 		hdrtree:add(p_tlp.fields.byte_count, buf(6, 2))
@@ -119,8 +130,13 @@ local function dissect_tlp(buf, pkt, tree)
 			'%.4s %s -> %s',
 			fmttp_map[h0:uint()], pretty_pcieid(buf(4, 2)), pretty_pcieid(buf(8, 2))
 		))
-		hdrtree:add(buf(8,2), "Decoded requester:", pretty_pcieid(buf(8, 2)))
+		hdrtree:add(buf(8, 2), "Decoded requester:", pretty_pcieid(buf(8, 2)))
 		hdrtree:add(p_tlp.fields.tag, buf(10, 1))
+
+		local req_frame = req_to_frame[buf(8, 3):uint()]
+		hdrtree:add(p_tlp.fields.req_frame, buf(8, 3), req_frame)
+		reqframe_to_resframe[req_frame] = pkt.number
+
 		hdrtree:add(p_tlp.fields.lower_addr, buf(11, 1))
 	end
 
@@ -133,9 +149,13 @@ local p_dltlp = Proto("pcie.dltlp", "PCIe DL TLP")
 p_dltlp.fields.seqno = ProtoField.uint16("pcie.dl.tlp_seqno", "Seq num", base.HEX, nil, 0x0FFF)
 p_dltlp.fields.lcrc = ProtoField.uint32("pcie.dl.tlp_lcrc", "LCRC", base.HEX)
 
+local dl_seq_to_frame = {}
+
 local function dissect_dltlp(buf, pkt, tree)
-	local subtree = tree:add(p_dltlp, buf(0, 2))
-	subtree:add(p_dltlp.fields.seqno, buf(0, 2))
+	local dlhdr = buf(0, 2)
+	local subtree = tree:add(p_dltlp, dlhdr)
+	subtree:add(p_dltlp.fields.seqno, dlhdr)
+	dl_seq_to_frame[bit.band(dlhdr:uint(), 0x0FFF)] = pkt.number
 	local n = dissect_tlp(buf(2):tvb(), pkt, tree)
 	subtree:add(p_dltlp.fields.lcrc, buf(2 + n, 4))
 	return 6 + n
@@ -176,6 +196,7 @@ local dlltp_map = {
 
 p_dllp.fields.type = ProtoField.uint8("pcie.dllp.type", "Type", base.HEX + base.RANGE_STRING, dlltp_map)
 p_dllp.fields.seq_num = ProtoField.uint24("pcie.dllp.seq_num", "Seq num", base.HEX, nil, 0x000FFF)
+p_dllp.fields.tlp_frame = ProtoField.framenum("pcie.dllp.tlp_frame", "Acked frame", base.NONE, frametype.ACK)
 
 p_dllp.fields.vcid = ProtoField.uint8("pcie.dllp.vcid", "VC ID", base.DEC, nil, 0x07)
 p_dllp.fields.hdr_scale = ProtoField.uint24("pcie.dllp.hdr_scale", "Hdr scale", base.DEC, nil, 0xC00000)
@@ -189,7 +210,7 @@ local function dissect_dllp(buf, pkt, tree)
 	local subtree = tree:add(p_dllp, buf(0, 6))
 	subtree:add(p_dllp.fields.type, buf(0, 1))
 	-- local contents = subtree:add(buf(1, 3), "Contents")
-	local tp = buf(0,1):uint()
+	local tp = buf(0, 1):uint()
 	local data = buf(1, 3)
 	if bit.band(tp, 0xC0) ~= 0 and bit.band(tp, 0x08) == 0 then
 		subtree:add(p_dllp.fields.vcid, buf(0, 1))
@@ -199,6 +220,8 @@ local function dissect_dllp(buf, pkt, tree)
 		subtree:add(p_dllp.fields.datafc, data)
 	elseif bit.band(tp, 0xEF) == 0 then
 		subtree:add(p_dllp.fields.seq_num, data)
+		local seq = bit.band(data:uint(), 0x000FFF)
+		subtree:add(p_dllp.fields.tlp_frame, data, dl_seq_to_frame[seq])
 	else
 		data_dis:call(data:tvb(), pkt, subtree)
 	end
@@ -229,9 +252,9 @@ local protos = {
 function p_pcie.dissector(buf, pkt, tree)
 	pkt.cols.protocol = "PCIe/IP"
 	local subtree = tree:add(p_pcie, buf(0, 1))
-	subtree:add(p_pcie.fields.proto, buf(0,1))
+	subtree:add(p_pcie.fields.proto, buf(0, 1))
 
-	local proto_id = buf(0,1):uint()
+	local proto_id = buf(0, 1):uint()
 	local subdissector = protos[proto_id]
 	if subdissector ~= nil then
 		pkt.cols.info:set(pcie_protos[proto_id])
