@@ -6,7 +6,7 @@ stages:
 
 image: d2s://external/docker/debian:bookworm
 
-lint:
+test:
   <<: *ace
   stage: lint
   variables:
@@ -15,6 +15,9 @@ lint:
     SCALENODE_DISK: 1
   before_script:
     - apt-get update
-    - apt-get install -y lua-check
+    - apt-get install -y lua-check tshark
+    - mkdir -p ~/.config/wireshark/plugins
+    - ln -s $PWD/*.lua ~/.config/wireshark/plugins
   script:
     - luacheck *.lua
+    - tshark -r sample.pcapng | grep PCIe
