@@ -15,9 +15,9 @@ test:
     SCALENODE_DISK: 1
   before_script:
     - apt-get update
-    - apt-get install -y lua-check tshark
-    - mkdir -p ~/.config/wireshark/plugins
-    - ln -s $PWD/*.lua ~/.config/wireshark/plugins
+    - apt-get install -y lua-check tshark python3-pip git
   script:
+    - pip install --break-system-packages git+https://github.com/antmicro/tuttest
+    - tuttest README.md install | sh -
     - luacheck *.lua
-    - tshark -r sample.pcapng | grep PCIe
+    - tuttest README.md test | sh - | diff --color -uw - <(tuttest README.md gold)

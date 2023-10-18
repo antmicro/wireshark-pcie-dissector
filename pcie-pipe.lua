@@ -118,10 +118,8 @@ local function dissect_tlp(buf, pkt, tree)
 		dissect_pcieid(p_tlp.fields.rq_id, buf(4, 2), hdrtree)
 		hdrtree:add(buf(8, 2), "Decoded requester:", pretty_pcieid(buf(8, 2)))
 		hdrtree:add(p_tlp.fields.tag, buf(6, 1))
-
 		local req_uniq = buf(4, 3):uint()
 		req_to_frame[req_uniq] = pkt.number
-		hdrtree:add(p_tlp.fields.res_frame, buf(4, 3), reqframe_to_resframe[pkt.number])
 
 		hdrtree:add(p_tlp.fields.last_be, buf(7, 1))
 		hdrtree:add(p_tlp.fields.first_be, buf(7, 1))
@@ -129,11 +127,13 @@ local function dissect_tlp(buf, pkt, tree)
 		if le == 4 then
 			addr = buf(8, 8)
 		end
-		hdrtree:add(p_tlp.fields.addr, addr)
 		pkt.cols.info:set(string.format(
 			'%.4s %s @ %08x',
 			fmttp_map[h0:uint()], pretty_pcieid(buf(4, 2)), addr:uint()
 		))
+		hdrtree:add(p_tlp.fields.addr, addr)
+
+		hdrtree:add(p_tlp.fields.res_frame, buf(4, 3), reqframe_to_resframe[pkt.number])
 	else
 		-- Completion
 		dissect_pcieid(p_tlp.fields.comp_id, buf(4, 2), hdrtree)
