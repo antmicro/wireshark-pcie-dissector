@@ -2,13 +2,13 @@
   tags: ['ace-x86_64']
 
 stages:
-  - lint
+  - test
 
 image: d2s://external/docker/debian:bookworm
 
 test:
   <<: *ace
-  stage: lint
+  stage: test
   variables:
     SCALENODE_CPU: 1
     SCALENODE_RAM: 1024
@@ -18,6 +18,6 @@ test:
     - apt-get install -y lua-check tshark python3-pip git
   script:
     - pip install --break-system-packages git+https://github.com/antmicro/tuttest
-    - tuttest README.md install | sh -
+    - tuttest README.md install | sh
     - luacheck *.lua
-    - tuttest README.md test | sh - | diff --color -uw - <(tuttest README.md gold)
+    - tuttest README.md test | sh | diff --color -uw - <(tuttest README.md gold)

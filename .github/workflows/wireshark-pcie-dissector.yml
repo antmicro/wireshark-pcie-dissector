@@ -1,0 +1,17 @@
+name: wireshark-pcie-dissector
+run-name: Wireshark PCIe Dissector
+on: [push, pull_request]
+jobs:
+  Test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - run: sudo apt-get update && sudo apt-get install -y lua-check tshark
+      - run: pip install git+https://github.com/antmicro/tuttest
+      - run: |
+          tuttest README.md install | sh
+          luacheck *.lua
+          tuttest README.md test | sh | diff --color -uw - <(tuttest README.md gold)
