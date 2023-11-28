@@ -60,7 +60,7 @@ p_tlp.fields.comp_id = ProtoField.uint16("pcie.tlp.comp_id", "Completer ID", bas
 p_tlp.fields.status = ProtoField.uint16("pcie.tlp.status", "Status", base.HEX, nil, 0xE000)
 p_tlp.fields.bcm = ProtoField.uint16("pcie.tlp.bcm", "BCM", base.HEX, nil, 0x1000, "Bridge control mechanism")
 p_tlp.fields.byte_count = ProtoField.uint16("pcie.tlp.byte_count", "Byte count", base.HEX, nil, 0x0FFF)
-p_tlp.fields.lower_addr = ProtoField.uint16("pcie.tlp.lower_addr", "Lower address", base.HEX, nil, 0x7F)
+p_tlp.fields.lower_addr = ProtoField.uint8("pcie.tlp.lower_addr", "Lower address", base.HEX, nil, 0x7F)
 
 p_tlp.fields.bus_no = ProtoField.uint16("pcie.tlp.bus_no", "Bus number", base.HEX, nil, 0xFF00)
 p_tlp.fields.dev_no = ProtoField.uint16("pcie.tlp.dev_no", "Dev. number", base.HEX, nil, 0x00F8, "Device number")
@@ -116,7 +116,7 @@ local function dissect_tlp(buf, pkt, tree)
 	if bit.band(buf(0, 1):uint(), 0x1e) ~= 0x0a then
 		-- Read/Write
 		dissect_pcieid(p_tlp.fields.rq_id, buf(4, 2), hdrtree)
-		hdrtree:add(buf(8, 2), "Decoded requester:", pretty_pcieid(buf(8, 2)))
+		hdrtree:add(buf(4, 2), "Decoded requester:", pretty_pcieid(buf(4, 2)))
 		hdrtree:add(p_tlp.fields.tag, buf(6, 1))
 		local req_uniq = buf(4, 3):uint()
 		req_to_frame[req_uniq] = pkt.number
@@ -133,7 +133,11 @@ local function dissect_tlp(buf, pkt, tree)
 		))
 		hdrtree:add(p_tlp.fields.addr, addr)
 
-		hdrtree:add(p_tlp.fields.res_frame, buf(4, 3), reqframe_to_resframe[pkt.number])
+		if reqframe_to_resframe[pkt.number] ~= nil then
+			hdrtree:add(p_tlp.fields.res_frame, buf(4, 3), reqframe_to_resframe[pkt.number])
+		else
+			hdrtree:add(buf(4, 3), "Warning: missing response")
+		end
 	else
 		-- Completion
 		dissect_pcieid(p_tlp.fields.comp_id, buf(4, 2), hdrtree)

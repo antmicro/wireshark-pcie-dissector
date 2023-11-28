@@ -11,7 +11,7 @@ test:
   stage: test
   variables:
     SCALENODE_CPU: 1
-    SCALENODE_RAM: 1024
+    SCALENODE_RAM: 2048
     SCALENODE_DISK: 1
   before_script:
     - apt-get update
