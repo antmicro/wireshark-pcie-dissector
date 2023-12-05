@@ -31,6 +31,8 @@ local fmttp_map = {
 	[0x42] = "IOWr: I/O Write Request",
 	[0x0A] = "Cpl : Completion without Data",
 	[0x4A] = "CplD: Completion with Data",
+	[0x04] = "CR0: Config read 0",
+	[0x44] = "CW0: Config write 0",
 }
 
 p_tlp.fields.fmttp = ProtoField.uint8("pcie.tlp.fmttp", "TLP Type", base.HEX, fmttp_map)
