@@ -89,10 +89,10 @@ local req_to_frame = {}
 local reqframe_to_resframe = {}
 
 local function dissect_tlp(buf, pkt, tree)
-	local fmt = bit.rshift(buf(0, 1):uint(), 5)
+	local h0 = buf(0, 1)
+	local fmt = bit.rshift(h0:uint(), 5)
 	local le = 3 + bit.band(fmt, 1)
 	local hdrtree = tree:add(p_tlp, buf(0, le * 4))
-	local h0 = buf(0, 1)
 	local tptree = hdrtree:add(p_tlp.fields.fmttp, h0)
 	tptree:add(p_tlp.fields.fmt, h0)
 	tptree:add(p_tlp.fields.type, h0)
@@ -115,7 +115,7 @@ local function dissect_tlp(buf, pkt, tree)
 		length = 0
 	end
 
-	if bit.band(buf(0, 1):uint(), 0x1e) ~= 0x0a then
+	if bit.band(h0:uint(), 0x1e) ~= 0x0a then
 		-- Read/Write
 		dissect_pcieid(p_tlp.fields.rq_id, buf(4, 2), hdrtree)
 		hdrtree:add(buf(4, 2), "Decoded requester:", pretty_pcieid(buf(4, 2)))
@@ -135,10 +135,16 @@ local function dissect_tlp(buf, pkt, tree)
 		))
 		hdrtree:add(p_tlp.fields.addr, addr)
 
-		if reqframe_to_resframe[pkt.number] ~= nil then
-			hdrtree:add(p_tlp.fields.res_frame, buf(4, 3), reqframe_to_resframe[pkt.number])
+		local frame = reqframe_to_resframe[pkt.number]
+		if frame ~= nil then
+			hdrtree:add(p_tlp.fields.res_frame, buf(4, 3), frame)
 		else
-			hdrtree:add(buf(4, 3), "Warning: missing response")
+			local msg = "(no response)"
+			-- Read
+			if length == 0 then
+				msg = "Warning: missing response"
+			end
+			hdrtree:add(buf(4, 3), msg)
 		end
 	else
 		-- Completion
@@ -244,7 +250,12 @@ local function dissect_dllp(buf, pkt, tree)
 	elseif bit.band(tp, 0xEF) == 0 then
 		subtree:add(p_dllp.fields.seq_num, data)
 		local seq = bit.band(data:uint(), 0x000FFF)
-		subtree:add(p_dllp.fields.tlp_frame, data, dl_seq_to_frame[seq])
+		local frame = dl_seq_to_frame[seq]
+		if frame ~= nil then
+			subtree:add(p_dllp.fields.tlp_frame, data, frame)
+		else
+			hdrtree:add(data, "Warning: ACK for missing packet?")
+		end
 	else
 		data_dis:call(data:tvb(), pkt, subtree)
 	end
