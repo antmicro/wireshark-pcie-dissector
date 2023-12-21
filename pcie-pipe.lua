@@ -254,7 +254,7 @@ local function dissect_dllp(buf, pkt, tree)
 		if frame ~= nil then
 			subtree:add(p_dllp.fields.tlp_frame, data, frame)
 		else
-			hdrtree:add(data, "Warning: ACK for missing packet?")
+			subtree:add(data, "Warning: ACK for missing packet?")
 		end
 	else
 		data_dis:call(data:tvb(), pkt, subtree)
